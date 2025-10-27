@@ -79,7 +79,7 @@ def add_sample(uuid_str, rssi):
                  to its entry in the survirors dictionary, update last_seen, last_rssi and avg signals.
     """
     t = time.time()
-    entry = surviors[uuid_str]
+    entry = survivors[uuid_str]
     entry['last_seen'] = t
     # Add new sample reading and compute new avearge only if we received a new reading
     if rssi:
@@ -113,26 +113,29 @@ def packet_handler(pkt):
     """
     Description: Called in sniffing thread for each packet.
     """
-    # only consider management beacons (type=0 subtype=8) to match what transmitter sends
-    if not pkt.haslayer(Dot11):
-        return
-    if pkt.type != 0 or pkt.subtype != 8:
-        return
+    try:
+        # only consider management beacons (type=0 subtype=8) to match what transmitter sends
+        if not pkt.haslayer(Dot11):
+            return
+        if pkt.type != 0 or pkt.subtype != 8:
+            return
 
-    # Extract the vendor info from the packet (should be OUI + survivor_uuid)
-    vendor_info = find_vendor_info(pkt)
-    if not vendor_info or vendor_info[:3] != OUI:
-        return
-    uuid_survivor = extract_uuid_from_vendor(vendor_info)
-    if not uuid_survivor:
-        return
+        # Extract the vendor info from the packet (should be OUI + survivor_uuid)
+        vendor_info = find_vendor_info(pkt)
+        if not vendor_info or vendor_info[:3] != OUI:
+            return
+        uuid_survivor = extract_uuid_from_vendor(vendor_info)
+        if not uuid_survivor:
+            return
 
-    # Extract resistance reading from radio tap layer
-    if not pkt.haslayer(RadioTap):
-        return
-    rssi = extract_rssi(pkt) # Extract signal strength
+        # Extract resistance reading from radio tap layer
+        if not pkt.haslayer(RadioTap):
+            return
+        rssi = extract_rssi(pkt) # Extract signal strength
 
-    pkt_q.put((uuid_str, rssi, time.time())) # push to queue
+        pkt_q.put((uuid_str, rssi, time.time())) # push to queue
+    except Exception:
+        pass
     
 
 def sniff_thread_func(iface):

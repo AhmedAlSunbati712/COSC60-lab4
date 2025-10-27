@@ -1,5 +1,6 @@
 """
 survivor_transmitter.py
+wlan0 BC:07:1D:74:50:A2
 
 Usage:
   sudo ./survivor_transmitter.py <iface> <MAC_address> [rate]
