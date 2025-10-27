@@ -58,7 +58,7 @@ class KeyExchange(Packet):
             3: "VERIFY_INIT_TO_RESP",  # Initiator sends key hash
             4: "VERIFY_RESP_TO_INIT"   # Responder replies with "OK" or "FAIL"
         }),
-        PacketLenField("payload_len", 0, length_from=lambda p: len(p.payload)),
+        ShortField("payload_len", None),
         # Payload field for indices and hash
         StrLenField("payload", "", length_from=lambda p: p.payload_len)
     ]
