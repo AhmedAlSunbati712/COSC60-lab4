@@ -46,7 +46,7 @@ def find_vendor_info(pkt):
     while elt:
         if elt.ID == 221:
             return bytes(elt.info)
-        elt = elt.payload.getlayer(elt)
+        elt = elt.payload.getlayer(Dot11Elt)
     return None
 
 def extract_uuid_from_vendor(info_bytes):
@@ -133,7 +133,7 @@ def packet_handler(pkt):
             return
         rssi = extract_rssi(pkt) # Extract signal strength
 
-        pkt_q.put((uuid_str, rssi, time.time())) # push to queue
+        pkt_q.put((uuid_survivor, rssi, time.time())) # push to queue
     except Exception:
         pass
     
