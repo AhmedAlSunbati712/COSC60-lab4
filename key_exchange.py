@@ -316,35 +316,41 @@ def perform_exchange(role):
         last_seen_retry = {}
 
         def reply_packet(pkt):
-            """Processes sniffed packets and replies."""
-            # Check if it's our vendor packet from the peer (initiator)
-            if pkt.haslayer(Dot11Elt) and pkt.addr2.lower() == PEER_MAC.lower() and pkt[Dot11Elt].ID == 221:
-                ke_data = unpack_ke_data(pkt[Dot11Elt].info)
+            try:
+                """Processes sniffed packets and replies."""
+                # Check if it's our vendor packet from the peer (initiator)
+                if (pkt[Dot11].addr2.lower() == PEER_MAC.lower()):
+                    pkt.show()
 
-                if not ke_data:
-                    return
+                if pkt.haslayer(Dot11Elt) and pkt.addr2.lower() == PEER_MAC.lower() and pkt[Dot11Elt].ID == 221:
+                    ke_data = unpack_ke_data(pkt[Dot11Elt].info)
 
-                # Ensure it's the correct message type
-                if ke_data['msg_type'] == MSG_TYPES.get("RSSI_INIT_TO_RESP"):
-                    index = ke_data['index']
-                    retry_num = ke_data['retry_num']
-                    last_retry = last_seen_retry.get(index, -1)
+                    if not ke_data:
+                        return
 
-                    if retry_num >= last_retry:
-                        rssi = get_rssi(pkt)
-                        if rssi is not None:
-                            rssi_measurements[index] = rssi
-                            last_seen_retry[index] = retry_num
-                            print(f"  Accepted index {index} on retry {retry_num} with RSSI: {rssi}")
+                    # Ensure it's the correct message type
+                    if ke_data['msg_type'] == MSG_TYPES.get("RSSI_INIT_TO_RESP"):
+                        index = ke_data['index']
+                        retry_num = ke_data['retry_num']
+                        last_retry = last_seen_retry.get(index, -1)
 
-                            # Pack the reply data
-                            reply_bytes = pack_ke_data(msg_type=MSG_TYPES.get("RSSI_RESP_TO_INIT"), index=index)
+                        if retry_num >= last_retry:
+                            rssi = get_rssi(pkt)
+                            if rssi is not None:
+                                rssi_measurements[index] = rssi
+                                last_seen_retry[index] = retry_num
+                                print(f"  Accepted index {index} on retry {retry_num} with RSSI: {rssi}")
 
-                            # Build and send the reply
-                            reply_pkt = RadioTap() / \
-                                        Dot11(addr1=PEER_MAC, addr2=MY_MAC, addr3=PEER_MAC) / \
-                                        Dot11Elt(ID=221, info=reply_bytes)
-                            sendp(reply_pkt, iface=IFACE, verbose=0)
+                                # Pack the reply data
+                                reply_bytes = pack_ke_data(msg_type=MSG_TYPES.get("RSSI_RESP_TO_INIT"), index=index)
+
+                                # Build and send the reply
+                                reply_pkt = RadioTap() / \
+                                            Dot11(addr1=PEER_MAC, addr2=MY_MAC, addr3=PEER_MAC) / \
+                                            Dot11Elt(ID=221, info=reply_bytes)
+                                sendp(reply_pkt, iface=IFACE, verbose=0)
+            except Exception:
+                return
 
         # This is a single blocking call that processes packets with reply_packet
         sniff(iface=IFACE, prn=reply_packet, timeout=RESPONDER_SNIFF_TIMEOUT)
