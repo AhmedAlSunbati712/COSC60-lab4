@@ -246,29 +246,31 @@ def perform_exchange(role):
                 #       Dot11(addr1=PEER_MAC, addr2=MY_MAC, addr3=PEER_MAC) / \
                 #       KeyExchange(index=index, retry_num=retries, msg_type=0) # RSSI_INIT_TO_RESP
                 pkt = RadioTap() / \
-                      Dot11(addr1=PEER_MAC, addr2=MY_MAC, addr3=PEER_MAC) / \
+                      Dot11(type=0, subtype=4, addr1=PEER_MAC, addr2=MY_MAC, addr3=PEER_MAC) / \
                       Dot11Elt(ID=221, info=ke_bytes) # RSSI_INIT_TO_RESP
-                try:
-                    ans = srp1(pkt, iface=IFACE, timeout=RESPONSE_TIMEOUT, verbose=0, retry=10)
-                except Exception:
-                    pass
-                # sendp(pkt, iface=IFACE, verbose=0, count=10, inter=0.15)
 
-                if ans:
-                    rssi = get_rssi(ans)
-                    if rssi is not None:
-                        print(f" -> Success! RSSI: {rssi}")
-                        rssi_measurements[index] = rssi
-                        success = True
-                    else:
-                        print(" -> Reply received, but no RSSI. Retrying...")
-                        retries += 1
-                else:
-                    print(" -> Timeout. Retrying...")
-                    retries += 1
+                pkt.show()
+                # try:
+                #     ans = srp1(pkt, iface=IFACE, timeout=RESPONSE_TIMEOUT, verbose=0, retry=10)
+                # except Exception:
+                #     pass
+                sendp(pkt, iface=IFACE, verbose=0, count=10, inter=0.15)
 
-            if not success:
-                print(f"Failed to get response for index {index} after {MAX_RETRIES_PER_PACKET} retries.")
+                # if ans:
+                #     rssi = get_rssi(ans)
+                #     if rssi is not None:
+                #         print(f" -> Success! RSSI: {rssi}")
+                #         rssi_measurements[index] = rssi
+                #         success = True
+                #     else:
+                #         print(" -> Reply received, but no RSSI. Retrying...")
+                #         retries += 1
+                # else:
+                #     print(" -> Timeout. Retrying...")
+                #     retries += 1
+
+            # if not success:
+            #     print(f"Failed to get response for index {index} after {MAX_RETRIES_PER_PACKET} retries.")
 
             index += 1
         print("Initiator finished sending key exchange packets.")
