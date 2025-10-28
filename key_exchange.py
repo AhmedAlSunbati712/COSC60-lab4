@@ -247,7 +247,7 @@ def perform_exchange(role):
                 #       KeyExchange(index=index, retry_num=retries, msg_type=0) # RSSI_INIT_TO_RESP
                 pkt = RadioTap() / \
                       Dot11(addr1=PEER_MAC, addr2=MY_MAC, addr3=PEER_MAC) / \
-                      Dot11elt(ID=221, info=ke_bytes) # RSSI_INIT_TO_RESP
+                      Dot11Elt(ID=221, info=ke_bytes) # RSSI_INIT_TO_RESP
                 try:
                     ans = srp1(pkt, iface=IFACE, timeout=RESPONSE_TIMEOUT, verbose=0, retry=10)
                 except Exception:
@@ -280,23 +280,44 @@ def perform_exchange(role):
         def reply_packet(pkt):
             """Processes sniffed packets and replies."""
             # Check if it's our custom packet from the peer (initiator)
-            if KeyExchange in pkt and pkt[KeyExchange].msg_type == 0: # RSSI_INIT_TO_RESP
-                index = pkt[KeyExchange].index
-                retry_num = pkt[KeyExchange].retry_num
-                last_retry = last_seen_retry.get(index, -1)
+            if pkt.haslayer(Dot11Elt) and pkt[Dot11Elt].ID == 221:
+                ke_pkt = KeyExchange(pkt[Dot11Elt].info)
+                if ke_pkt.msg_type == 0:
+                    index = ke_pkt.index
+                    retry_num = ke_pkt.retry_num
+                    last_retry = last_seen_retry.get(index, -1)
 
-                if retry_num >= last_retry:
-                    rssi = get_rssi(pkt)
-                    if rssi is not None:
-                        rssi_measurements[index] = rssi
-                        last_seen_retry[index] = retry_num
-                        print(f"  Accepted index {index} on retry {retry_num} with RSSI: {rssi}")
+                    if retry_num >= last_retry:
+                        rssi = get_rssi(pkt)
+                        if rssi is not None:
+                            rssi_measurements[index] = rssi
+                            last_seen_retry[index] = retry_num
+                            print(f"  Accepted index {index} on retry {retry_num} with RSSI: {rssi}")
 
-                        # Build and send the reply
-                        reply_pkt = RadioTap() / \
-                                    Dot11(addr1=PEER_MAC, addr2=MY_MAC, addr3=PEER_MAC) / \
-                                    KeyExchange(index=index, msg_type=1) # RSSI_RESP_TO_INIT
-                        sendp(reply_pkt, iface=IFACE, verbose=0, count=10, inter=0.15)
+                            # Build and send the reply
+                            reply_pkt = RadioTap() / \
+                                        Dot11(addr1=PEER_MAC, addr2=MY_MAC, addr3=PEER_MAC) / \
+                                        KeyExchange(index=index, msg_type=1) # RSSI_RESP_TO_INIT
+                            sendp(reply_pkt, iface=IFACE, verbose=0, count=10, inter=0.15)
+            
+            
+            # if KeyExchange in pkt and pkt[KeyExchange].msg_type == 0: # RSSI_INIT_TO_RESP
+            #     index = pkt[KeyExchange].index
+            #     retry_num = pkt[KeyExchange].retry_num
+            #     last_retry = last_seen_retry.get(index, -1)
+
+            #     if retry_num >= last_retry:
+            #         rssi = get_rssi(pkt)
+            #         if rssi is not None:
+            #             rssi_measurements[index] = rssi
+            #             last_seen_retry[index] = retry_num
+            #             print(f"  Accepted index {index} on retry {retry_num} with RSSI: {rssi}")
+
+            #             # Build and send the reply
+            #             reply_pkt = RadioTap() / \
+            #                         Dot11(addr1=PEER_MAC, addr2=MY_MAC, addr3=PEER_MAC) / \
+            #                         KeyExchange(index=index, msg_type=1) # RSSI_RESP_TO_INIT
+            #             sendp(reply_pkt, iface=IFACE, verbose=0, count=10, inter=0.15)
 
         # This is a single blocking call that processes packets with reply_packet
         sniff(iface=IFACE, prn=reply_packet, timeout=RESPONDER_SNIFF_TIMEOUT)
