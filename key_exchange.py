@@ -313,33 +313,33 @@ def perform_exchange(role):
                       Dot11Elt(ID=221, info=ke_bytes)
 
                 # Send the packet and wait for a single response
-                #ans = srp1(pkt, iface=IFACE, timeout=RESPONSE_TIMEOUT, verbose=0)
-                sendp(pkt, iface=IFACE, count=1, verbose=0)
-                sniff(iface=IFACE, prn=packet_handler_resonder_reply)
-                # print("here 0")
-                # if ans:
-                #     print("here 1")
-                #     # Check if the response contains our data and is the correct type
-                #     if ans.haslayer(Dot11Elt) and ans[Dot11Elt].ID == 221:
-                #         print("here 2")
-                #         response_data = unpack_ke_data(ans[Dot11Elt].info)
-                #         if response_data and response_data['msg_type'] == MSG_TYPES.get("RSSI_RESP_TO_INIT") and response_data['index'] == index:
-                #             print("here 3")
-                #             rssi = get_rssi(ans)
-                #             if rssi is not None:
-                #                 print("here 4")
-                #                 print(f" -> Success! RSSI: {rssi}")
-                #                 rssi_measurements[index] = rssi
-                #                 success = True
-                #             else:
-                #                 print("else here 4")
-                #                 print(" -> Reply received, but no RSSI. Retrying...")
-                #         else:
-                #             print(" -> Received wrong response type. Retrying...")
-                #     else:
-                #         print(" -> Received non-protocol response. Retrying...")
-                # else:
-                #     print(" -> Timeout. Retrying...")
+                ans = srp1(pkt, iface=IFACE, timeout=RESPONSE_TIMEOUT, verbose=0)
+                # sendp(pkt, iface=IFACE, count=1, verbose=0)
+                # sniff(iface=IFACE, prn=packet_handler_resonder_reply)
+                print("here 0")
+                if ans:
+                    print("here 1")
+                    # Check if the response contains our data and is the correct type
+                    if ans.haslayer(Dot11Elt) and ans[Dot11Elt].ID == 221:
+                        print("here 2")
+                        response_data = unpack_ke_data(ans[Dot11Elt].info)
+                        if response_data and response_data['msg_type'] == MSG_TYPES.get("RSSI_RESP_TO_INIT") and response_data['index'] == index:
+                            print("here 3")
+                            rssi = get_rssi(ans)
+                            if rssi is not None:
+                                print("here 4")
+                                print(f" -> Success! RSSI: {rssi}")
+                                rssi_measurements[index] = rssi
+                                success = True
+                            else:
+                                print("else here 4")
+                                print(" -> Reply received, but no RSSI. Retrying...")
+                        else:
+                            print(" -> Received wrong response type. Retrying...")
+                    else:
+                        print(" -> Received non-protocol response. Retrying...")
+                else:
+                    print(" -> Timeout. Retrying...")
 
                 if not success:
                     retries += 1
@@ -385,7 +385,7 @@ def perform_exchange(role):
                                 print(reply_bytes)
                                 # Build and send the reply
                                 reply_pkt = RadioTap() / \
-                                            Dot11(addr1=PEER_MAC, addr2=MY_MAC, addr3=PEER_MAC) / \
+                                            Dot11(type=0, subtype=4, addr1=PEER_MAC, addr2=MY_MAC, addr3=PEER_MAC) / \
                                             Dot11Elt(ID=221, info=reply_bytes)
                                 sendp(reply_pkt, iface=IFACE, verbose=0)
             except Exception:
