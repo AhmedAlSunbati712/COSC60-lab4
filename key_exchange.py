@@ -36,9 +36,9 @@ DISCOVERY_LISTEN_TIME = 3
 INITIATOR_LISTEN_TIMEOUT = 1 # to listen for an ACK after sending READY
 
 # Exchange parameters
-TOTAL_PACKETS = 300
+TOTAL_PACKETS = 30
 MAX_RETRIES_PER_PACKET = 20
-RESPONSE_TIMEOUT = 1
+RESPONSE_TIMEOUT = 0.5
 RESPONDER_SNIFF_TIMEOUT = TOTAL_PACKETS * (RESPONSE_TIMEOUT * MAX_RETRIES_PER_PACKET) * 1.2 + 30.0
 
 # Message types for the key exchange payload
@@ -316,7 +316,7 @@ def perform_exchange(role):
                 #ans = srp1(pkt, iface=IFACE, timeout=RESPONSE_TIMEOUT, verbose=0)
                 sendp(pkt, iface=IFACE, verbose=0)
                 ans = None
-                while True:
+                for _ in range(20):
                     ans = sniff(
                         iface=IFACE,
                         timeout=RESPONSE_TIMEOUT,
