@@ -48,3 +48,7 @@ The bits from this lab aren't enough for a decent cryptographic key, but perhaps
 #### Responder
 
 ![](./img/responder.png)
+
+
+#### search and rescue video
+![](https://drive.google.com/file/d/1jou_ER3_4bc1A0Y94bsaUbYxB93a7XxV/view?usp=sharing)
