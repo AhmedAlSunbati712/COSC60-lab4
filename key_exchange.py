@@ -43,11 +43,11 @@ RESPONDER_SNIFF_TIMEOUT = TOTAL_PACKETS * (RESPONSE_TIMEOUT * MAX_RETRIES_PER_PA
 
 # Message types for the key exchange payload
 MSG_TYPES = {
-    0: "RSSI_INIT_TO_RESP",
-    1: "RSSI_RESP_TO_INIT",
-    2: "INDICES_INIT_TO_RESP", # Initiator sends used indices
-    3: "VERIFY_INIT_TO_RESP",  # Initiator sends key hash
-    4: "VERIFY_RESP_TO_INIT"   # Responder replies with "OK" or "FAIL"
+    "RSSI_INIT_TO_RESP" : 0,
+    "RSSI_RESP_TO_INIT" : 1,
+    "INDICES_INIT_TO_RESP" : 2, # Initiator sends used indices
+    "VERIFY_INIT_TO_RESP" : 3,  # Initiator sends key hash
+    "VERIFY_RESP_TO_INIT" : 4   # Responder replies with "OK" or "FAIL"
 }
 
 # --- Data Packing/Unpacking Functions ---
@@ -63,7 +63,9 @@ def pack_ke_data(msg_type, index=0, retry_num=0, payload=b''):
     - payload (variable)
     """
     payload_len = len(payload)
-    header = struct.pack('!HBBH', index, retry_num, msg_type, payload_len)
+    print(type(index), type(retry_num), type(msg_type), type(payload_len))
+    header = struct.pack('!BBBHBBH', OUI, index, retry_num, msg_type, payload_len)
+    
     return header + payload
 
 def unpack_ke_data(data):
@@ -71,7 +73,7 @@ def unpack_ke_data(data):
     Unpacks key exchange data from a bytes object.
     Returns a dictionary with the data or None if unpacking fails.
     """
-    header_format = '!HBBH'
+    header_format = '!BBBHBBH'
     header_size = struct.calcsize(header_format)
     if len(data) < header_size:
         return None
