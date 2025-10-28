@@ -32,14 +32,14 @@ OUI = b'\xAA\xBB\xC5'
 MSG_TYPE_READY = 0x01
 MSG_TYPE_ACK = 0x02
 DISCOVERY_LISTEN_TIME = 3
-INITIATOR_LISTEN_TIMEOUT = 2.0 # to listen for an ACK after sending READY
+INITIATOR_LISTEN_TIMEOUT = 1 # to listen for an ACK after sending READY
 
 # Exchange parameters
 TOTAL_PACKETS = 300
-MAX_RETRIES_PER_PACKET = 3
-RESPONSE_TIMEOUT = 0.2
+MAX_RETRIES_PER_PACKET = 20
+RESPONSE_TIMEOUT = 0.5
 # Calculate responder sniff timeout based on max possible exchange time
-RESPONDER_SNIFF_TIMEOUT = TOTAL_PACKETS * (RESPONSE_TIMEOUT * MAX_RETRIES_PER_PACKET) + 30.0
+RESPONDER_SNIFF_TIMEOUT = TOTAL_PACKETS * ((RESPONSE_TIMEOUT + INITIATOR_LISTEN_TIMEOUT) * MAX_RETRIES_PER_PACKET) + 30.0
 
 
 class KeyExchange(Packet):
@@ -98,12 +98,11 @@ def perform_discovery():
         # We only care about vendor-specific elements
         if not pkt.haslayer(Dot11Elt):
             return
-
+        
         elt = pkt.getlayer(Dot11Elt)
         while elt:
             # Check for our specific element: ID 221, length 10 (3 OUI + 1 type + 6 MAC), and matching OUI
             if elt.ID == 221 and len(elt.info) == 10 and elt.info[:3] == OUI:
-
                 # If we've already completed discovery, do nothing
                 if discovery_complete_flag:
                     return
@@ -111,12 +110,11 @@ def perform_discovery():
                 msg_type = elt.info[3]
                 peer_mac_bytes = elt.info[4:]
                 peer_mac_str = ':'.join(f'{b:02x}' for b in peer_mac_bytes)
-
                 # Ignore our own packets
                 if peer_mac_str.lower() == MY_MAC.lower():
                     elt = elt.payload.getlayer(Dot11Elt)
                     continue
-
+                
                 if msg_type == MSG_TYPE_READY:
                     # We found an initiator. We are the responder.
                     print(f"Heard READY from {peer_mac_str}")
@@ -242,13 +240,19 @@ def perform_exchange(role):
 
             while retries < MAX_RETRIES_PER_PACKET and not success:
                 print(f"  Attempting index {index} (try {retries + 1}/{MAX_RETRIES_PER_PACKET})...", end='', flush=True)
-
+                ke_bytes = bytes(KeyExchange(index=index, retry_num=retries, msg_type=0))
                 # Build the packet to send
+                # pkt = RadioTap() / \
+                #       Dot11(addr1=PEER_MAC, addr2=MY_MAC, addr3=PEER_MAC) / \
+                #       KeyExchange(index=index, retry_num=retries, msg_type=0) # RSSI_INIT_TO_RESP
                 pkt = RadioTap() / \
                       Dot11(addr1=PEER_MAC, addr2=MY_MAC, addr3=PEER_MAC) / \
-                      KeyExchange(index=index, retry_num=retries, msg_type=0) # RSSI_INIT_TO_RESP
-
-                ans = srp1(pkt, iface=IFACE, timeout=RESPONSE_TIMEOUT, verbose=0)
+                      Dot11elt(ID=221, info=ke_bytes) # RSSI_INIT_TO_RESP
+                try:
+                    ans = srp1(pkt, iface=IFACE, timeout=RESPONSE_TIMEOUT, verbose=0, retry=10)
+                except Exception:
+                    pass
+                # sendp(pkt, iface=IFACE, verbose=0, count=10, inter=0.15)
 
                 if ans:
                     rssi = get_rssi(ans)
@@ -292,7 +296,7 @@ def perform_exchange(role):
                         reply_pkt = RadioTap() / \
                                     Dot11(addr1=PEER_MAC, addr2=MY_MAC, addr3=PEER_MAC) / \
                                     KeyExchange(index=index, msg_type=1) # RSSI_RESP_TO_INIT
-                        sendp(reply_pkt, iface=IFACE, verbose=0)
+                        sendp(reply_pkt, iface=IFACE, verbose=0, count=10, inter=0.15)
 
         # This is a single blocking call that processes packets with reply_packet
         sniff(iface=IFACE, prn=reply_packet, timeout=RESPONDER_SNIFF_TIMEOUT)
