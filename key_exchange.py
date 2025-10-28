@@ -64,7 +64,7 @@ def pack_ke_data(msg_type, index=0, retry_num=0, payload=b''):
     """
     payload_len = len(payload)
     print(type(index), type(retry_num), type(msg_type), type(payload_len))
-    header = struct.pack('!BBBHBBH', OUI, index, retry_num, msg_type, payload_len)
+    header = OUI + struct.pack('!HBBH', index, retry_num, msg_type, payload_len)
     
     return header + payload
 
@@ -73,12 +73,12 @@ def unpack_ke_data(data):
     Unpacks key exchange data from a bytes object.
     Returns a dictionary with the data or None if unpacking fails.
     """
-    header_format = '!BBBHBBH'
+    header_format = '!HBBH'
     header_size = struct.calcsize(header_format)
     if len(data) < header_size:
         return None
 
-    index, retry_num, msg_type, payload_len = struct.unpack(header_format, data[:header_size])
+    index, retry_num, msg_type, payload_len = struct.unpack(header_format, data[3:header_size])
 
     if len(data) < header_size + payload_len:
         return None
