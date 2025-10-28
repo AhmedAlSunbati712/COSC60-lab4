@@ -38,7 +38,7 @@ INITIATOR_LISTEN_TIMEOUT = 1 # to listen for an ACK after sending READY
 # Exchange parameters
 TOTAL_PACKETS = 300
 MAX_RETRIES_PER_PACKET = 20
-RESPONSE_TIMEOUT = 0.5
+RESPONSE_TIMEOUT = 1
 RESPONDER_SNIFF_TIMEOUT = TOTAL_PACKETS * (RESPONSE_TIMEOUT * MAX_RETRIES_PER_PACKET) * 1.2 + 30.0
 
 # Message types for the key exchange payload
@@ -313,16 +313,40 @@ def perform_exchange(role):
                       Dot11Elt(ID=221, info=ke_bytes)
 
                 # Send the packet and wait for a single response
-                ans = srp1(pkt, iface=IFACE, timeout=RESPONSE_TIMEOUT, verbose=0)
+                #ans = srp1(pkt, iface=IFACE, timeout=RESPONSE_TIMEOUT, verbose=0)
+                sendp(pkt, iface=IFACE, verbose=0)
+                ans = None
+                while True:
+                    ans = sniff(
+                        iface=IFACE,
+                        timeout=RESPONSE_TIMEOUT,
+                        stop_filter=lambda p: (
+                            p.haslayer(Dot11Elt)
+                            and p[Dot11Elt].ID == 221
+                            and p.addr2.lower() == PEER_MAC.lower()
+                        )
+                    )
+                    if ans:
+                        ans = ans[0]
+                        if ans.haslayer(Dot11Elt) and ans[Dot11Elt].ID == 221:
+                            response_data = unpack_ke_data(ans[Dot11Elt].info)
+                            if response_data and response_data['index'] == index:
+                                break
+
+
+
                 # sendp(pkt, iface=IFACE, count=1, verbose=0)
                 # sniff(iface=IFACE, prn=packet_handler_resonder_reply)
                 print("here 0")
                 if ans:
+                    ans = ans[0]
                     print("here 1")
                     # Check if the response contains our data and is the correct type
                     if ans.haslayer(Dot11Elt) and ans[Dot11Elt].ID == 221:
                         print("here 2")
                         response_data = unpack_ke_data(ans[Dot11Elt].info)
+                        print(response_data)
+                        print(f"index from response_data: {response_data['index']}, index from loop: {index}")
                         if response_data and response_data['msg_type'] == MSG_TYPES.get("RSSI_RESP_TO_INIT") and response_data['index'] == index:
                             print("here 3")
                             rssi = get_rssi(ans)
