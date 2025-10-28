@@ -13,7 +13,7 @@ On both devices:
     sudo python3 rssi_key_exchange_no_threads.py <interface_name>
 
 citation: Google Gemini for explanation on probe requests for Dot11 instead of default Data frame
-          and help on how Dot11 elements are stacked
+          and help on how Dot11 elements are stacked; and for final cleanup of stale comments
 citation: https://scapy.readthedocs.io/en/latest/build_dissect.html for custom layer info
 """
 
@@ -287,7 +287,6 @@ def perform_exchange(role):
 
         print("Initiator finished sending RSSI packets.")
         
-        # --- NEW HANDSHAKE LOGIC ---
         print("Signaling end of exchange and waiting for ACK...")
         ack_received = False
         ack_retries = 0
@@ -318,7 +317,6 @@ def perform_exchange(role):
         if not ack_received:
             print("Error: Did not receive exchange completion ACK from responder. Aborting.")
             return {} # Return empty dict to signal failure
-        # --- END HANDSHAKE LOGIC ---
 
     elif role == 'responder':
         print(f"Responder sniffing for packets from {PEER_MAC}...")
@@ -336,7 +334,6 @@ def perform_exchange(role):
 
                 msg_type = ke_data.get('msg_type')
 
-                # --- MODIFIED: Respond to completion signal ---
                 if msg_type == MSG_TYPES.get("EXCHANGE_COMPLETE"):
                     print("Received exchange complete signal. Sending ACK and stopping sniff.")
                     # Send ACK back immediately
@@ -347,7 +344,6 @@ def perform_exchange(role):
                     sendp(ack_pkt, iface=IFACE, count=3, inter=0.1, verbose=0)
                     exchange_is_complete = True # This will stop the sniff
                     return
-                # --- END MODIFICATION ---
 
                 if msg_type == MSG_TYPES.get("RSSI_INIT_TO_RESP"):
                     index, retry_num = ke_data['index'], ke_data['retry_num']
