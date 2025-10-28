@@ -78,7 +78,7 @@ def unpack_ke_data(data):
     if len(data) < header_size:
         return None
 
-    index, retry_num, msg_type, payload_len = struct.unpack(header_format, data[3:header_size])
+    index, retry_num, msg_type, payload_len = struct.unpack(header_format, data[3: 3 + header_size])
 
     if len(data) < header_size + payload_len:
         return None
