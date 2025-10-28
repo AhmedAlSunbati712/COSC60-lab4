@@ -74,16 +74,20 @@ def unpack_ke_data(data):
     Returns a dictionary with the data or None if unpacking fails.
     """
     header_format = '!HBBH'
-    header_size = struct.calcsize(header_format)
-    if len(data) < header_size:
-        return None
+    header_size = struct.calcsize(header_format) 
+    print("unpack_here1")
+    print(data)
+    print("hex data", data.hex())
 
+    if len(data) < 3 + header_size:
+        return None
     index, retry_num, msg_type, payload_len = struct.unpack(header_format, data[3: 3 + header_size])
-
-    if len(data) < header_size + payload_len:
+    print(f"index: {index}, retry_num: {retry_num}, msg_type: {msg_type}, payload_len: {payload_len}")
+    print("unpack here 2")
+    if len(data) < 3 + header_size + payload_len:
         return None
 
-    payload = data[header_size : header_size + payload_len]
+    payload = data[3 + header_size : 3 + header_size + payload_len]
 
     return {
         "index": index,
@@ -253,16 +257,44 @@ def parse_args():
 
 def get_rssi(pkt):
     """Extracts the RSSI value from a RadioTap header."""
-    return pkt[RadioTap].dbm_antsignal if RadioTap in pkt else None
+    return pkt[RadioTap].dBm_AntSignal if RadioTap in pkt else None
 
 def perform_exchange(role):
     """
     Performs the main packet exchange to gather RSSI measurements.
     Returns a dictionary of {index: rssi_value}
     """
+
+
     rssi_measurements = {}
 
     if role == 'initiator':
+        success = False
+        def packet_handler_resonder_reply(pkt):
+            nonlocal success
+            
+            if pkt.haslayer(Dot11Elt) and pkt[Dot11].addr2 == PEER_MAC and pkt[Dot11Elt].ID == 221:
+                pkt.show()
+                print("here 2")
+                response_data = unpack_ke_data(pkt[Dot11Elt].info)
+                # print(pkt[Dot11Elt].info)
+                print(response_data)
+                if response_data and response_data['msg_type'] == MSG_TYPES.get("RSSI_RESP_TO_INIT") and response_data['index'] == index:
+                    print("here 3")
+                    rssi = get_rssi(pkt)
+                    if rssi is not None:
+                        print("here 4")
+                        print(f" -> Success! RSSI: {rssi}")
+                        rssi_measurements[index] = rssi
+                        success = True
+                            
+                    else:
+                        print("else here 4")
+                        print(" -> Reply received, but no RSSI. Retrying...")
+                else:
+                    print(" -> Received wrong response type. Retrying..." )
+                return True
+            return False
         print(f"Initiator starting {TOTAL_PACKETS} packet exchanges with {PEER_MAC}...")
         index = 0
         while index < TOTAL_PACKETS:
@@ -281,26 +313,33 @@ def perform_exchange(role):
                       Dot11Elt(ID=221, info=ke_bytes)
 
                 # Send the packet and wait for a single response
-                ans = srp1(pkt, iface=IFACE, timeout=RESPONSE_TIMEOUT, verbose=0)
-
-                if ans:
-                    # Check if the response contains our data and is the correct type
-                    if ans.haslayer(Dot11Elt) and ans[Dot11Elt].ID == 221:
-                        response_data = unpack_ke_data(ans[Dot11Elt].info)
-                        if response_data and response_data['msg_type'] == MSG_TYPES.get("RSSI_RESP_TO_INIT") and response_data['index'] == index:
-                            rssi = get_rssi(ans)
-                            if rssi is not None:
-                                print(f" -> Success! RSSI: {rssi}")
-                                rssi_measurements[index] = rssi
-                                success = True
-                            else:
-                                print(" -> Reply received, but no RSSI. Retrying...")
-                        else:
-                            print(" -> Received wrong response type. Retrying...")
-                    else:
-                        print(" -> Received non-protocol response. Retrying...")
-                else:
-                    print(" -> Timeout. Retrying...")
+                #ans = srp1(pkt, iface=IFACE, timeout=RESPONSE_TIMEOUT, verbose=0)
+                sendp(pkt, iface=IFACE, count=1, verbose=0)
+                sniff(iface=IFACE, prn=packet_handler_resonder_reply)
+                # print("here 0")
+                # if ans:
+                #     print("here 1")
+                #     # Check if the response contains our data and is the correct type
+                #     if ans.haslayer(Dot11Elt) and ans[Dot11Elt].ID == 221:
+                #         print("here 2")
+                #         response_data = unpack_ke_data(ans[Dot11Elt].info)
+                #         if response_data and response_data['msg_type'] == MSG_TYPES.get("RSSI_RESP_TO_INIT") and response_data['index'] == index:
+                #             print("here 3")
+                #             rssi = get_rssi(ans)
+                #             if rssi is not None:
+                #                 print("here 4")
+                #                 print(f" -> Success! RSSI: {rssi}")
+                #                 rssi_measurements[index] = rssi
+                #                 success = True
+                #             else:
+                #                 print("else here 4")
+                #                 print(" -> Reply received, but no RSSI. Retrying...")
+                #         else:
+                #             print(" -> Received wrong response type. Retrying...")
+                #     else:
+                #         print(" -> Received non-protocol response. Retrying...")
+                # else:
+                #     print(" -> Timeout. Retrying...")
 
                 if not success:
                     retries += 1
@@ -343,7 +382,7 @@ def perform_exchange(role):
 
                                 # Pack the reply data
                                 reply_bytes = pack_ke_data(msg_type=MSG_TYPES.get("RSSI_RESP_TO_INIT"), index=index)
-
+                                print(reply_bytes)
                                 # Build and send the reply
                                 reply_pkt = RadioTap() / \
                                             Dot11(addr1=PEER_MAC, addr2=MY_MAC, addr3=PEER_MAC) / \
