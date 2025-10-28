@@ -26,6 +26,8 @@ sudo ./set_monitor_mode.sh wlan0 11
 
 - Is RSSI a good proxy for distance in this rescue use case?: _It's an imperfect proxy for distance; It's good for directional guidance (following the gradient) but it's poor for absolute distance estimation. Since the system's goal is to locate a nearby person and not to compute a precise coordinate, it generally serves its function in this case. Especially when combined with human judgement._
 
+- [VIDEO](https://drive.google.com/file/d/1jou_ER3_4bc1A0Y94bsaUbYxB93a7XxV/view?usp=sharing)
+
 ## Part 2: Secret Key Exchange
 
 ### Calculate a key on each device 
@@ -43,9 +45,20 @@ The bits from this lab aren't enough for a decent cryptographic key, but perhaps
 
 #### Initiator
 
+<br>
+<hr>
+
+.
+
 ![](./img/initiator.png)
 
 #### Responder
+
+<br>
+<hr>
+
+.
+
 
 ![](./img/responder.png)
 
