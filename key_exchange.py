@@ -129,7 +129,7 @@ def perform_discovery():
                         ack_pkt = RadioTap() / \
                                   Dot11(addr1=PEER_MAC, addr2=MY_MAC, addr3=PEER_MAC, type=0, subtype=4) / \
                                   ack_elt
-                        sendp(ack_pkt, iface=IFACE, verbose=0, count=3, inter=0.1)
+                        sendp(ack_pkt, iface=IFACE, verbose=0, count=10, inter=0.15)
 
                     discovery_complete_flag = True
                     return
