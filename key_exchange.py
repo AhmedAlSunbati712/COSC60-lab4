@@ -18,9 +18,10 @@ import sys
 import hashlib
 import numpy as np
 import time
+import struct
 from scapy.all import *
 
-# Configuration
+# --- Configuration ---
 # Global variables that will be set by discovery
 IFACE = None
 MY_MAC = None
@@ -38,32 +39,60 @@ INITIATOR_LISTEN_TIMEOUT = 1 # to listen for an ACK after sending READY
 TOTAL_PACKETS = 300
 MAX_RETRIES_PER_PACKET = 20
 RESPONSE_TIMEOUT = 0.5
-# Calculate responder sniff timeout based on max possible exchange time
-RESPONDER_SNIFF_TIMEOUT = TOTAL_PACKETS * ((RESPONSE_TIMEOUT + INITIATOR_LISTEN_TIMEOUT) * MAX_RETRIES_PER_PACKET) + 30.0
+RESPONDER_SNIFF_TIMEOUT = TOTAL_PACKETS * (RESPONSE_TIMEOUT * MAX_RETRIES_PER_PACKET) * 1.2 + 30.0
 
+# Message types for the key exchange payload
+MSG_TYPES = {
+    0: "RSSI_INIT_TO_RESP",
+    1: "RSSI_RESP_TO_INIT",
+    2: "INDICES_INIT_TO_RESP", # Initiator sends used indices
+    3: "VERIFY_INIT_TO_RESP",  # Initiator sends key hash
+    4: "VERIFY_RESP_TO_INIT"   # Responder replies with "OK" or "FAIL"
+}
 
-class KeyExchange(Packet):
+# --- Data Packing/Unpacking Functions ---
+
+def pack_ke_data(msg_type, index=0, retry_num=0, payload=b''):
     """
-    Custom Scapy layer for all communication after discovery.
+    Packs key exchange data into a bytes object.
+    Format: !HBBH (Network byte order)
+    - index (2 bytes)
+    - retry_num (1 byte)
+    - msg_type (1 byte)
+    - payload_len (2 bytes)
+    - payload (variable)
     """
-    name = "KeyExchange"
-    fields_desc = [
-        ShortField("index", 0),
-        ByteField("retry_num", 0),
+    payload_len = len(payload)
+    header = struct.pack('!HBBH', index, retry_num, msg_type, payload_len)
+    return header + payload
 
-        ByteEnumField("msg_type", 0, {
-            0: "RSSI_INIT_TO_RESP",
-            1: "RSSI_RESP_TO_INIT",
-            2: "INDICES_INIT_TO_RESP", # Initiator sends used indices
-            3: "VERIFY_INIT_TO_RESP",  # Initiator sends key hash
-            4: "VERIFY_RESP_TO_INIT"   # Responder replies with "OK" or "FAIL"
-        }),
-        ShortField("payload_len", None),
-        # Payload field for indices and hash
-        StrLenField("payload", "", length_from=lambda p: p.payload_len)
-    ]
+def unpack_ke_data(data):
+    """
+    Unpacks key exchange data from a bytes object.
+    Returns a dictionary with the data or None if unpacking fails.
+    """
+    header_format = '!HBBH'
+    header_size = struct.calcsize(header_format)
+    if len(data) < header_size:
+        return None
 
-# Discovery Functions
+    index, retry_num, msg_type, payload_len = struct.unpack(header_format, data[:header_size])
+
+    if len(data) < header_size + payload_len:
+        return None
+
+    payload = data[header_size : header_size + payload_len]
+
+    return {
+        "index": index,
+        "retry_num": retry_num,
+        "msg_type": msg_type,
+        "payload_len": payload_len,
+        "payload": payload
+    }
+
+
+# --- Discovery Functions ---
 
 def create_vendor_elt(msg_type):
     """
@@ -98,7 +127,7 @@ def perform_discovery():
         # We only care about vendor-specific elements
         if not pkt.haslayer(Dot11Elt):
             return
-        
+
         elt = pkt.getlayer(Dot11Elt)
         while elt:
             # Check for our specific element: ID 221, length 10 (3 OUI + 1 type + 6 MAC), and matching OUI
@@ -114,7 +143,7 @@ def perform_discovery():
                 if peer_mac_str.lower() == MY_MAC.lower():
                     elt = elt.payload.getlayer(Dot11Elt)
                     continue
-                
+
                 if msg_type == MSG_TYPE_READY:
                     # We found an initiator. We are the responder.
                     print(f"Heard READY from {peer_mac_str}")
@@ -196,7 +225,7 @@ def perform_discovery():
     return role
 
 
-# Argument Parsing
+# --- Argument Parsing ---
 
 def parse_args():
     """Parses sys.argv to get the interface."""
@@ -218,7 +247,7 @@ def parse_args():
         print(e)
         sys.exit(1)
 
-# Key Exchange Functions
+# --- Key Exchange Functions ---
 
 def get_rssi(pkt):
     """Extracts the RSSI value from a RadioTap header."""
@@ -240,37 +269,42 @@ def perform_exchange(role):
 
             while retries < MAX_RETRIES_PER_PACKET and not success:
                 print(f"  Attempting index {index} (try {retries + 1}/{MAX_RETRIES_PER_PACKET})...", end='', flush=True)
-                ke_bytes = bytes(KeyExchange(index=index, retry_num=retries, msg_type=0))
-                # Build the packet to send
-                # pkt = RadioTap() / \
-                #       Dot11(addr1=PEER_MAC, addr2=MY_MAC, addr3=PEER_MAC) / \
-                #       KeyExchange(index=index, retry_num=retries, msg_type=0) # RSSI_INIT_TO_RESP
+
+                # Pack the data into bytes
+                ke_bytes = pack_ke_data(msg_type=MSG_TYPES.get("RSSI_INIT_TO_RESP"), index=index, retry_num=retries)
+
+                # Build the packet to send using a vendor-specific element
                 pkt = RadioTap() / \
                       Dot11(type=0, subtype=4, addr1=PEER_MAC, addr2=MY_MAC, addr3=PEER_MAC) / \
-                      Dot11Elt(ID=221, info=ke_bytes) # RSSI_INIT_TO_RESP
+                      Dot11Elt(ID=221, info=ke_bytes)
 
-                pkt.show()
-                # try:
-                #     ans = srp1(pkt, iface=IFACE, timeout=RESPONSE_TIMEOUT, verbose=0, retry=10)
-                # except Exception:
-                #     pass
-                sendp(pkt, iface=IFACE, verbose=0, count=10, inter=0.15)
+                # Send the packet and wait for a single response
+                ans = srp1(pkt, iface=IFACE, timeout=RESPONSE_TIMEOUT, verbose=0)
 
-                # if ans:
-                #     rssi = get_rssi(ans)
-                #     if rssi is not None:
-                #         print(f" -> Success! RSSI: {rssi}")
-                #         rssi_measurements[index] = rssi
-                #         success = True
-                #     else:
-                #         print(" -> Reply received, but no RSSI. Retrying...")
-                #         retries += 1
-                # else:
-                #     print(" -> Timeout. Retrying...")
-                #     retries += 1
+                if ans:
+                    # Check if the response contains our data and is the correct type
+                    if ans.haslayer(Dot11Elt) and ans[Dot11Elt].ID == 221:
+                        response_data = unpack_ke_data(ans[Dot11Elt].info)
+                        if response_data and response_data['msg_type'] == MSG_TYPES.get("RSSI_RESP_TO_INIT") and response_data['index'] == index:
+                            rssi = get_rssi(ans)
+                            if rssi is not None:
+                                print(f" -> Success! RSSI: {rssi}")
+                                rssi_measurements[index] = rssi
+                                success = True
+                            else:
+                                print(" -> Reply received, but no RSSI. Retrying...")
+                        else:
+                            print(" -> Received wrong response type. Retrying...")
+                    else:
+                        print(" -> Received non-protocol response. Retrying...")
+                else:
+                    print(" -> Timeout. Retrying...")
 
-            # if not success:
-            #     print(f"Failed to get response for index {index} after {MAX_RETRIES_PER_PACKET} retries.")
+                if not success:
+                    retries += 1
+
+            if not success:
+                print(f"Failed to get response for index {index} after {MAX_RETRIES_PER_PACKET} retries.")
 
             index += 1
         print("Initiator finished sending key exchange packets.")
@@ -281,12 +315,17 @@ def perform_exchange(role):
 
         def reply_packet(pkt):
             """Processes sniffed packets and replies."""
-            # Check if it's our custom packet from the peer (initiator)
-            if pkt.haslayer(Dot11Elt) and pkt[Dot11Elt].ID == 221:
-                ke_pkt = KeyExchange(pkt[Dot11Elt].info)
-                if ke_pkt.msg_type == 0:
-                    index = ke_pkt.index
-                    retry_num = ke_pkt.retry_num
+            # Check if it's our vendor packet from the peer (initiator)
+            if pkt.haslayer(Dot11Elt) and pkt.addr2.lower() == PEER_MAC.lower() and pkt[Dot11Elt].ID == 221:
+                ke_data = unpack_ke_data(pkt[Dot11Elt].info)
+
+                if not ke_data:
+                    return
+
+                # Ensure it's the correct message type
+                if ke_data['msg_type'] == MSG_TYPES.get("RSSI_INIT_TO_RESP"):
+                    index = ke_data['index']
+                    retry_num = ke_data['retry_num']
                     last_retry = last_seen_retry.get(index, -1)
 
                     if retry_num >= last_retry:
@@ -296,30 +335,14 @@ def perform_exchange(role):
                             last_seen_retry[index] = retry_num
                             print(f"  Accepted index {index} on retry {retry_num} with RSSI: {rssi}")
 
+                            # Pack the reply data
+                            reply_bytes = pack_ke_data(msg_type=MSG_TYPES.get("RSSI_RESP_TO_INIT"), index=index)
+
                             # Build and send the reply
                             reply_pkt = RadioTap() / \
                                         Dot11(addr1=PEER_MAC, addr2=MY_MAC, addr3=PEER_MAC) / \
-                                        KeyExchange(index=index, msg_type=1) # RSSI_RESP_TO_INIT
-                            sendp(reply_pkt, iface=IFACE, verbose=0, count=10, inter=0.15)
-            
-            
-            # if KeyExchange in pkt and pkt[KeyExchange].msg_type == 0: # RSSI_INIT_TO_RESP
-            #     index = pkt[KeyExchange].index
-            #     retry_num = pkt[KeyExchange].retry_num
-            #     last_retry = last_seen_retry.get(index, -1)
-
-            #     if retry_num >= last_retry:
-            #         rssi = get_rssi(pkt)
-            #         if rssi is not None:
-            #             rssi_measurements[index] = rssi
-            #             last_seen_retry[index] = retry_num
-            #             print(f"  Accepted index {index} on retry {retry_num} with RSSI: {rssi}")
-
-            #             # Build and send the reply
-            #             reply_pkt = RadioTap() / \
-            #                         Dot11(addr1=PEER_MAC, addr2=MY_MAC, addr3=PEER_MAC) / \
-            #                         KeyExchange(index=index, msg_type=1) # RSSI_RESP_TO_INIT
-            #             sendp(reply_pkt, iface=IFACE, verbose=0, count=10, inter=0.15)
+                                        Dot11Elt(ID=221, info=reply_bytes)
+                            sendp(reply_pkt, iface=IFACE, verbose=0)
 
         # This is a single blocking call that processes packets with reply_packet
         sniff(iface=IFACE, prn=reply_packet, timeout=RESPONDER_SNIFF_TIMEOUT)
@@ -359,9 +382,14 @@ def get_common_indices(role, temp_key):
     if role == 'initiator':
         print("Initiator sending its index list...")
         indices_str = ",".join(map(str, sorted(list(initial_indices))))
+
+        # Pack data and send
+        payload_bytes = indices_str.encode('utf-8')
+        ke_bytes = pack_ke_data(msg_type=MSG_TYPES.get("INDICES_INIT_TO_RESP"), payload=payload_bytes)
+
         pkt = RadioTap() / \
               Dot11(addr1=PEER_MAC, addr2=MY_MAC, addr3=PEER_MAC) / \
-              KeyExchange(msg_type=2, payload=indices_str) # INDICES_INIT_TO_RESP
+              Dot11Elt(ID=221, info=ke_bytes)
 
         sendp(pkt, iface=IFACE, count=3, inter=0.2, verbose=0)
         print(f"Sent {len(initial_indices)} indices.")
@@ -369,23 +397,24 @@ def get_common_indices(role, temp_key):
 
     elif role == 'responder':
         print("Responder waiting for index list...")
-        received_pkt = None
+        received_pkt_payload = None
 
         def get_indices_pkt(pkt):
-            nonlocal received_pkt
-            if KeyExchange in pkt and pkt[KeyExchange].msg_type == 2: # INDICES_INIT_TO_RESP
-                received_pkt = pkt
-                return True  # Stop sniffing
+            nonlocal received_pkt_payload
+            if pkt.haslayer(Dot11Elt) and pkt[Dot11Elt].ID == 221 and pkt.addr2.lower() == PEER_MAC.lower():
+                ke_data = unpack_ke_data(pkt[Dot11Elt].info)
+                if ke_data and ke_data['msg_type'] == MSG_TYPES.get("INDICES_INIT_TO_RESP"):
+                    received_pkt_payload = ke_data['payload']
+                    return True  # Stop sniffing
             return False
 
-        # This is a blocking listen
         sniff(iface=IFACE, stop_filter=get_indices_pkt, timeout=30)
 
-        if not received_pkt:
+        if not received_pkt_payload:
             print("Error: Did not receive index list from initiator.")
             return None
 
-        received_indices_str = received_pkt[KeyExchange].payload.decode('utf-8')
+        received_indices_str = received_pkt_payload.decode('utf-8')
         received_indices = set(map(int, received_indices_str.split(',')))
 
         common_indices = sorted(list(initial_indices.intersection(received_indices)))
@@ -398,57 +427,67 @@ def perform_verification(role, key_hash):
     """
     if role == 'initiator':
         print("Initiator sending key hash for verification.")
+        payload_bytes = key_hash.encode('utf-8')
+        ke_bytes = pack_ke_data(msg_type=MSG_TYPES.get("VERIFY_INIT_TO_RESP"), payload=payload_bytes)
+
         pkt = RadioTap() / \
               Dot11(addr1=PEER_MAC, addr2=MY_MAC, addr3=PEER_MAC) / \
-              KeyExchange(msg_type=3, payload=key_hash) # VERIFY_INIT_TO_RESP
+              Dot11Elt(ID=221, info=ke_bytes)
 
-        ans = srp1(pkt, iface=IFACE, timeout=1.0, retry=3, verbose=0)
+        ans = srp1(pkt, iface=IFACE, timeout=10.0, retry=3, verbose=0)
 
-        if ans and KeyExchange in ans and ans[KeyExchange].msg_type == 4: # VERIFY_RESP_TO_INIT
-            result = ans[KeyExchange].payload.decode('utf-8')
-            if result == "OK":
-                print("SUCCESS: Responder confirmed keys match!")
-            elif result == "FAIL":
-                print("FAILURE: Responder reports keys DO NOT match.")
-            else:
-                print(f"Error: Do not recognize responder's message: {result}")
-        else:
-            print("Error: Did not receive verification result from responder.")
+        if ans and ans.haslayer(Dot11Elt) and ans[Dot11Elt].ID == 221:
+            ke_data = unpack_ke_data(ans[Dot11Elt].info)
+            if ke_data and ke_data['msg_type'] == MSG_TYPES.get("VERIFY_RESP_TO_INIT"):
+                result = ke_data['payload'].decode('utf-8')
+                if result == "OK":
+                    print("SUCCESS: Responder confirmed keys match!")
+                elif result == "FAIL":
+                    print("FAILURE: Responder reports keys DO NOT match.")
+                else:
+                    print(f"Error: Do not recognize responder's message: {result}")
+                return
+
+        print("Error: Did not receive valid verification result from responder.")
 
     elif role == 'responder':
         print("Responder waiting for key hash...")
-        received_pkt = None
+        received_pkt_payload = None
 
         def get_verify_pkt(pkt):
-            nonlocal received_pkt
-            if KeyExchange in pkt and pkt[KeyExchange].msg_type == 3: # VERIFY_INIT_TO_RESP
-                received_pkt = pkt
-                return True
+            nonlocal received_pkt_payload
+            if pkt.haslayer(Dot11Elt) and pkt[Dot11Elt].ID == 221 and pkt.addr2.lower() == PEER_MAC.lower():
+                ke_data = unpack_ke_data(pkt[Dot11Elt].info)
+                if ke_data and ke_data['msg_type'] == MSG_TYPES.get("VERIFY_INIT_TO_RESP"):
+                    received_pkt_payload = ke_data['payload']
+                    return True
             return False
 
         sniff(iface=IFACE, stop_filter=get_verify_pkt, timeout=30)
 
-        if not received_pkt:
+        if not received_pkt_payload:
             print("Error: Did not receive key hash from initiator.")
             return
 
-        received_hash = received_pkt[KeyExchange].payload.decode('utf-8')
-        reply_payload = ""
+        received_hash = received_pkt_payload.decode('utf-8')
+        reply_payload_str = ""
 
         if received_hash == key_hash:
             print("SUCCESS: Hashes match!")
-            reply_payload = "OK"
+            reply_payload_str = "OK"
         else:
             print(f"FAILURE: Hashes DO NOT match.")
             print(f"  My Hash:     {key_hash}")
             print(f"  Peer's Hash: {received_hash}")
-            reply_payload = "FAIL"
+            reply_payload_str = "FAIL"
 
-        # Send the result back to the initiator (blocking send)
+        reply_payload_bytes = reply_payload_str.encode('utf-8')
+        reply_bytes = pack_ke_data(msg_type=MSG_TYPES.get("VERIFY_RESP_TO_INIT"), payload=reply_payload_bytes)
+
         reply_pkt = RadioTap() / \
                     Dot11(addr1=PEER_MAC, addr2=MY_MAC, addr3=PEER_MAC) / \
-                    KeyExchange(msg_type=4, payload=reply_payload) # VERIFY_RESP_TO_INIT
-        sendp(reply_pkt, iface=IFACE, verbose=0)
+                    Dot11Elt(ID=221, info=reply_bytes)
+        sendp(reply_pkt, iface=IFACE, verbose=0, count=3, inter=0.2)
 
 def main():
     global role, PEER_MAC
@@ -464,12 +503,6 @@ def main():
     print(f"Interface: {IFACE}")
     print(f"My MAC:    {MY_MAC}")
     print(f"Peer MAC:  {PEER_MAC}")
-
-    try:
-        bind_layers(Dot11, KeyExchange, addr1=PEER_MAC, addr2=MY_MAC)
-        bind_layers(Dot11, KeyExchange, addr1=MY_MAC, addr2=PEER_MAC)
-    except Exception as e:
-        print(f"Warning: Could not bind Scapy layers. Dissection could fail.\nError: {e}")
 
     rssi_measurements = perform_exchange(role)
     if not rssi_measurements:
@@ -503,7 +536,7 @@ def main():
     else:
         print(f"  Final Key: {final_key[:32]}...{final_key[-32:]}")
 
-    # 8. Hash key and perform verification
+    # Hash key and perform verification
     key_hash = hashlib.sha256(final_key.encode()).hexdigest()
     perform_verification(role, key_hash)
 
@@ -511,7 +544,4 @@ def main():
 
 
 if __name__ == "__main__":
-    # TODO: maybe add something to make sure we're in monitor mode
     main()
-
-
